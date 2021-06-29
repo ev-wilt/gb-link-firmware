@@ -35,7 +35,7 @@
 #include "tusb.h"
 #include "hardware/pio.h"
 #include "pio/pio_spi.h"
-const uint SI_PIN = 3;
+
 //--------------------------------------------------------------------+
 // MACRO CONSTANT TYPEDEF PROTYPES
 //--------------------------------------------------------------------+
@@ -56,22 +56,9 @@ enum  {
 
 static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
-#define URL  "tetris.stacksmashing.net"
-
-const tusb_desc_webusb_url_t desc_url =
-{
-  .bLength         = 3 + sizeof(URL) - 1,
-  .bDescriptorType = 3, // WEBUSB URL type
-  .bScheme         = 1, // 0: http, 1: https
-  .url             = URL
-};
-
-static bool web_serial_connected = false;
-
 //------------- prototypes -------------//
 void led_blinking_task(void);
 void cdc_task(void);
-void webserial_task(void);
 
 /*------------- MAIN -------------*/
 
@@ -79,7 +66,6 @@ void webserial_task(void);
           .pio = pio1,
           .sm = 0
   };
-
 
 #define PIN_SCK 0
 #define PIN_SIN 1
@@ -96,47 +82,26 @@ int main(void)
   {
     tud_task(); // tinyusb device task
     cdc_task();
-    webserial_task();
     led_blinking_task();
   }
 
   return 0;
 }
 
-int oldmain(void)
-{
-  board_init();
-
-  tusb_init();
-
-  while (1)
-  {
-    tud_task(); // tinyusb device task
-    cdc_task();
-    webserial_task();
-    led_blinking_task();
-  }
-
-  return 0;
-}
-
-// send characters to both CDC and WebUSB
+// send characters to CDC
 void echo_all(uint8_t buf[], uint32_t count)
 {
-  // echo to web serial
-  if ( web_serial_connected )
-  {
-    tud_vendor_write(buf, count);
-  }
-
   // echo to cdc
-  if ( tud_cdc_connected() )
+  if (tud_cdc_connected())
   {
-    for(uint32_t i=0; i<count; i++)
+    for(uint32_t i = 0; i < count; i++)
     {
       tud_cdc_write_char(buf[i]);
 
-      if ( buf[i] == '\r' ) tud_cdc_write_char('\n');
+      if (buf[i] == '\r')
+      {
+        tud_cdc_write_char('\n');
+      }
     }
     tud_cdc_write_flush();
   }
@@ -182,40 +147,21 @@ bool tud_vendor_control_request_cb(uint8_t rhport, tusb_control_request_t const 
 {
   switch (request->bRequest)
   {
-    case VENDOR_REQUEST_WEBUSB:
-      // match vendor request in BOS descriptor
-      // Get landing page url
-      return tud_control_xfer(rhport, request, (void*) &desc_url, desc_url.bLength);
-
     case VENDOR_REQUEST_MICROSOFT:
-      if ( request->wIndex == 7 )
+      if (request->wIndex == 7)
       {
         // Get Microsoft OS 2.0 compatible descriptor
         uint16_t total_len;
-        memcpy(&total_len, desc_ms_os_20+8, 2);
+        memcpy(&total_len, desc_ms_os_20 + 8, 2);
 
         return tud_control_xfer(rhport, request, (void*) desc_ms_os_20, total_len);
-      }else
+      }
+      else
       {
         return false;
       }
 
-    case 0x22:
-      // Webserial simulate the CDC_REQUEST_SET_CONTROL_LINE_STATE (0x22) to
-      // connect and disconnect.
-      web_serial_connected = (request->wValue != 0);
-
-      // Always lit LED if connected
-      if ( web_serial_connected )
-      {
-        board_led_write(true);
-        blink_interval_ms = BLINK_ALWAYS_ON;
-
-        // tud_vendor_write_str("\r\nTinyUSB WebUSB device example\r\n");
-      }else
-      {
-        blink_interval_ms = BLINK_MOUNTED;
-      }
+      blink_interval_ms = BLINK_MOUNTED;
 
       // response with status OK
       return tud_control_status(rhport, request);
@@ -238,26 +184,6 @@ bool tud_vendor_control_complete_cb(uint8_t rhport, tusb_control_request_t const
   return true;
 }
 
-void webserial_task(void)
-{
-  if ( web_serial_connected )
-  {
-    if ( tud_vendor_available() )
-    {
-      uint8_t buf[1];
-      uint32_t count = tud_vendor_read(buf, sizeof(buf));
-      if(count) {
-        // pprintf("Sending: %02x", buf[0]);
-        unsigned char rx;
-        pio_spi_write8_read8_blocking(&spi, buf, &rx, 1);
-        echo_all(&rx, 1);
-      }
-      // echo back to both web serial and cdc
-      // echo_all(buf, count);
-    }
-  }
-}
-
 
 //--------------------------------------------------------------------+
 // USB CDC
@@ -272,7 +198,8 @@ void cdc_task(void)
       
       uint8_t buf[1];
       uint32_t count = tud_vendor_read(buf, sizeof(buf));
-      if(count) {
+      if(count) 
+      {
         unsigned char rx;
         pio_spi_write8_read8_blocking(&spi, buf, &rx, 1);
         echo_all(&rx, 1);
@@ -296,7 +223,7 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
   (void) itf;
 
   // connected
-  if ( dtr && rts )
+  if (dtr && rts)
   {
     // print initial message when connected
     // tud_cdc_write_str("\r\nTinyUSB WebUSB device example\r\n");
@@ -318,7 +245,7 @@ void led_blinking_task(void)
   static bool led_state = false;
 
   // Blink every interval ms
-  if ( board_millis() - start_ms < blink_interval_ms) return; // not enough time
+  if (board_millis() - start_ms < blink_interval_ms) return; // not enough time
   start_ms += blink_interval_ms;
 
   board_led_write(led_state);
